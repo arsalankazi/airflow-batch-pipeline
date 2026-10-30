@@ -31,9 +31,9 @@ flowchart TD
     D -- Anomalies 4.3% --> S3_Quarantine
     D -- Clean Records 95.7% --> E
     E -. Partitioned Sink .-> S3_Curated
+```
 
-
-    ---
+---
 
 ## Key Engineering Highlights
 
@@ -76,7 +76,6 @@ airflow-batch-pipeline/
 └── README.md                        # Architectural documentation
 ```
 
-
 ---
 
 ## Quickstart & Local Setup
@@ -85,25 +84,23 @@ airflow-batch-pipeline/
 ```powershell
 docker compose up -d
 ```
-```markdown
+
 ### 2. Create LocalStack S3 Buckets
 ```powershell
 docker exec -it s3_storage awslocal s3 mb s3://ecommerce-raw-landing
 docker exec -it s3_storage awslocal s3 mb s3://ecommerce-curated-lake
 docker exec -it s3_storage awslocal s3 mb s3://ecommerce-quarantine
 ```
-```markdown
+
 ### 3. Register AWS Connection in Airflow
 ```powershell
 docker exec -it airflow_webserver airflow connections add "aws_default" --conn-type "aws" --conn-extra '{"endpoint_url": "http://s3_storage:4566", "aws_access_key_id": "test", "aws_secret_access_key": "test", "region_name": "us-east-1"}'
 ```
-```markdown
+
 ### 4. Trigger the DAG
 1. Navigate to the Airflow Web UI at `http://localhost:8080`.
 2. Login with configured Airflow Admin credentials (as specified in `docker-compose.yaml`).
 3. Unpause `ecommerce_batch_etl_pipeline` and trigger the DAG.
-```
-
 
 ---
 
@@ -122,23 +119,17 @@ docker exec -it s3_storage awslocal s3 ls s3://ecommerce-curated-lake/orders/ --
 docker exec -it s3_storage awslocal s3 ls s3://ecommerce-quarantine/quarantine/ --recursive
 ```
 
-
-```markdown
 ### Run Automated Data Assertions
 ```powershell
 Get-Content .\tests\test_pipeline_assertions.py | docker exec -i airflow_scheduler python -
 ```
 
-
-```markdown
 **Expected Output:**
 ```text
 PASS: Curated Lake Integrity (957 clean rows verified, 0 data contract violations)
 PASS: Quarantine Integrity (43 anomalies correctly filtered without pipeline failure)
 ```
 
-
-```markdown
 ---
 
 ## Author
@@ -146,5 +137,3 @@ PASS: Quarantine Integrity (43 anomalies correctly filtered without pipeline fai
 * **Name:** Arsalan Kazi
 * **Role:** Data Engineer
 * **Focus:** Distributed Systems, Lakehouse Architecture & Batch ETL Pipelines
-
-
