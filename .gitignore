@@ -1,5 +1,19 @@
+# Airflow execution logs & process IDs
 logs/
+*.log
+*.pid
+
+# Runtime generated batch landing data
+include/landing_data/
+*.csv
+
+# Python bytecode & cache
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*$py.class
 .pytest_cache/
+
+# Environment & OS files
+.env
+.DS_Store
+Thumbs.db
