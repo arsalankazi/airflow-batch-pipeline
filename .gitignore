@@ -1,19 +1,25 @@
-# Airflow execution logs & process IDs
+# Environment & Secrets
+.env
+*.env
+config/credentials
+
+# Airflow Runtime Logs & PID
 logs/
 *.log
-*.pid
+airflow-webserver.pid
+airflow-scheduler.pid
 
-# Runtime generated batch landing data
-include/landing_data/
-*.csv
+# Intermediate Data
+include/landing_data/*.csv
+include/landing_data/*.parquet
 
-# Python bytecode & cache
+# Python Cache & Virtual Environments
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
 .pytest_cache/
+.venv/
+venv/
 
-# Environment & OS files
-.env
+# OS specific
 .DS_Store
 Thumbs.db

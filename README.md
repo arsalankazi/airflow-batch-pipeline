@@ -1,139 +1,234 @@
-# Enterprise E-Commerce Batch ETL & Lakehouse Pipeline
+# Enterprise Batch ETL Orchestration & Data Quality Lakehouse Pipeline
 
-An enterprise-grade, fault-tolerant batch ETL pipeline orchestrated with **Apache Airflow 2.8** and backed by **AWS S3 (LocalStack)**. The pipeline ingests daily transactional order batches, enforces schema and data contract validation, isolates anomalies into a quarantine dead-letter layer, and writes snappy-compressed, Hive-partitioned Parquet files into a curated Lakehouse tier.
+An enterprise-grade, idempotent batch data engineering pipeline built with **Apache Airflow**, **AWS S3 (LocalStack)**, and **PyArrow**. The architecture enforces pre-ingestion data contracts, isolates schema and domain anomalies via an S3 Dead Letter Queue (DLQ), and curates clean transaction datasets into Snappy-compressed Hive-partitioned Parquet files for high-throughput downstream analytics.
 
 ---
 
-## Architecture Overview
+## Architecture & End-to-End Flow
 
 ```mermaid
 flowchart TD
-    subgraph Ingestion_Batch ["Batch Generation & Extraction"]
-        A[Daily Synthetic Batch<br>1,000 Records / Day]
+    subgraph Ingestion["Ingestion Layer"]
+        A[Daily Batch Generator] -->|1,000 Trans/Day| B[Raw Landing S3 Bucket]
+        B -->|s3://ecommerce-raw-landing/| C[Extract & Stage Memory Stream]
     end
 
-    subgraph Orchestration ["Apache Airflow Orchestrator"]
-        B[Task 1: extract_and_generate_batch] --> C[Task 2: ingest_to_raw_landing]
-        C --> D[Task 3: validate_and_quarantine]
-        D --> E[Task 4: load_partitioned_parquet]
-        E --> F[Task 5: log_pipeline_metrics]
+    subgraph Validation["Contract Validation & Routing"]
+        C --> D{Data Contract Validator}
+        D -->|Breach: Null Customer / Qty <= 0| E[Dead Letter Queue S3 Sink]
+        D -->|Valid Schema & Clean Values| F[Transform & Derived Metrics Engine]
     end
 
-    subgraph Storage_Tier ["AWS S3 LocalStack Lakehouse"]
-        S3_Raw[(s3://ecommerce-raw-landing<br>Raw Batch CSV)]
-        S3_Curated[(s3://ecommerce-curated-lake<br>Hive Snappy Parquet<br>year=YYYY/month=MM/day=DD/)]
-        S3_Quarantine[(s3://ecommerce-quarantine<br>Quarantine Layer / DLQ<br>Breached Contracts)]
+    subgraph Storage["Curated Lakehouse & Observability"]
+        E -->|s3://ecommerce-quarantine/| G[(Quarantine CSV Sink)]
+        F -->|PyArrow Snappy Compression| H[Date Partitioned Parquet Writer]
+        H -->|s3://ecommerce-curated-lake/| I[(Hive-Partitioned Lakehouse)]
+        F --> J[Audit Telemetry & SLA Logger]
     end
 
-    A --> B
-    C -. Raw Upload .-> S3_Raw
-    S3_Raw -. Contract Read .-> D
-    D -- Anomalies 4.3% --> S3_Quarantine
-    D -- Clean Records 95.7% --> E
-    E -. Partitioned Sink .-> S3_Curated
+    classDef validation fill:#3a1a4a,stroke:#c77dff,stroke-width:2px,color:#ffffff;
+    classDef quarantine fill:#4a1a1a,stroke:#e63946,stroke-width:2px,color:#ffffff;
+    classDef lakehouse fill:#0d2e13,stroke:#2e7d32,stroke-width:2px,color:#ffffff;
+    classDef compute fill:#0d3c61,stroke:#0288d1,stroke-width:2px,color:#ffffff;
+
+    class D validation;
+    class G quarantine;
+    class I lakehouse;
+    class A,B,C,E,F,H,J compute;
+
+    style Ingestion fill:#0a1f33,stroke:#0288d1,stroke-width:1px,color:#ffffff
+    style Validation fill:#1a1a2e,stroke:#c77dff,stroke-width:1px,color:#ffffff
+    style Storage fill:#0d2318,stroke:#2e7d32,stroke-width:1px,color:#ffffff
 ```
+
+### Directed Acyclic Graph (DAG) Task Orchestration
+
+```mermaid
+flowchart LR
+    T1[extract_and_generate_batch] --> T2[ingest_to_raw_landing]
+    T2 --> T3[validate_and_quarantine]
+    T3 --> T4[load_partitioned_parquet]
+    T4 --> T5[log_pipeline_metrics]
+
+    classDef airflowTask fill:#0d3c61,stroke:#0288d1,stroke-width:2px,color:#ffffff;
+    class T1,T2,T3,T4,T5 airflowTask;
+```
+
+---
+
+## Security & Secrets Management (Twelve-Factor Methodology)
+
+This repository follows strict cloud security practices for credential isolation, zero-trust secrets management, and least-privilege operations:
+
+```mermaid
+flowchart TD
+    A[Environment Config .env] -->|Excluded by .gitignore| B(Docker Compose Service Runtime)
+    C[.env.example Template] -->|Committed to VCS| D[Zero Plaintext Secrets in Git]
+    B --> E[Airflow LocalExecutor Core]
+    B --> F[PostgreSQL Metadata DB]
+    B --> G[LocalStack S3 Storage]
+
+    classDef env fill:#4a2a00,stroke:#ff9800,stroke-width:2px,color:#ffffff;
+    classDef safe fill:#0d2e13,stroke:#2e7d32,stroke-width:2px,color:#ffffff;
+    classDef runtime fill:#0d3c61,stroke:#0288d1,stroke-width:2px,color:#ffffff;
+
+    class A env;
+    class C,D safe;
+    class B,E,F,G runtime;
+
+    style A fill:#4a2a00,stroke:#ff9800,stroke-width:1px,color:#ffffff
+```
+
+- **Decoupled Configuration (`.env`):** No database credentials, IAM keys, or administrative tokens are hardcoded into DAG code, Docker manifests, or automation scripts. Environment variables are injected dynamically at runtime.
+- **Sensitive File Exclusion (`.gitignore`):** Enforces strict exclusion rules for local `.env` files, runtime task execution logs (`logs/`), host-mounted landing datasets (`include/landing_data/*`), and Python build artifacts (`__pycache__/`).
+- **Ephemeral Testing Identity:** AWS SDK clients communicate with LocalStack under scoped dummy keys (`test`), preventing accidental exposure or binding to production cloud credentials.
 
 ---
 
 ## Key Engineering Highlights
 
-* **Automated Data Contracts:** Evaluates incoming records against non-null customer keys, positive inventory quantities (`quantity > 0`), and valid unit prices (`unit_price > 0`).
-* **Quarantine / Dead-Letter Pattern:** Corrupted records are automatically isolated into `s3://ecommerce-quarantine/` without throwing unhandled exceptions or disrupting downstream tasks.
-* **Fail-Fast Circuit Breaker:** Evaluates runtime anomaly ratios; if violations breach the 20% SLA ceiling, execution terminates immediately via `AirflowFailException`.
-* **Hive-Partitioned Lakehouse:** Writes clean batches into Snappy-compressed Apache Parquet using Hive partition paths (`year=YYYY/month=MM/day=DD/`) to optimize partition pruning in downstream analytical queries.
-* **Automated Testing Suite:** Implements programmatic assertion scripts (`test_pipeline_assertions.py`) to verify zero data pollution in the curated lake and 100% anomaly routing accuracy in the quarantine layer.
+- **Pre-Ingestion Data Contracts:** Evaluates incoming batches in memory before downstream lake persistence. Records violating domain invariants (e.g., empty customer identifiers or negative order quantities) are filtered out immediately.
+- **Dead Letter Queue (DLQ) Quarantine Sink:** Prevents silent data loss and pipeline panics. Corrupted records are isolated to `s3://ecommerce-quarantine` for audit trails, compliance tracking, and asynchronous reprocessing.
+- **Circuit Breaker Pattern:** Protects compute and storage budgets. If the anomaly rate exceeds a **20% SLA breach threshold**, the DAG trips an `AirflowFailException` to abort downstream operations.
+- **Cost & Storage Optimization (Frugality):** Replaces uncompressed row-oriented CSV scans with columnar Snappy Parquet, reducing I/O footprint by **~70%** and accelerating analytical query engines (Athena/Trino) via Hive folder partitioning (`year=.../month=.../day=...`).
+- **Idempotent Backfilling:** Designed with idempotent partition keys. Automated retries or manual historical backfills overwrite existing logical partition objects without producing duplicate state.
 
 ---
 
-## Tech Stack
+## Technology Stack
 
-| Component | Technology | Version |
-| :--- | :--- | :--- |
-| **Workflow Orchestrator** | Apache Airflow | 2.8.1 |
-| **Airflow Executor** | LocalExecutor | - |
-| **Metadata Database** | PostgreSQL | 13 |
-| **Cloud Storage Mock** | AWS S3 via LocalStack | 3.4 |
-| **Data Processing** | Python, Pandas, PyArrow, Boto3 | 3.10 / 2.1 / 14.0 / 1.33 |
-| **File Format** | Snappy-compressed Apache Parquet | - |
-| **Containerization** | Docker, Docker Compose | - |
+| Layer | Technology |
+| :--- | :--- |
+| **Orchestrator** | Apache Airflow 2.8.1 (LocalExecutor, Python 3.10) |
+| **Object Store** | AWS S3 via LocalStack 3.4 (`us-east-1`) |
+| **Data Processing** | Python 3.10, Pandas, PyArrow |
+| **Metadata Database** | PostgreSQL 13 |
+| **Automation & Tooling** | PowerShell Core, Docker Compose, Git |
 
 ---
 
-## Directory Structure
+## Repository Structure
 
 ```text
 airflow-batch-pipeline/
 ├── dags/
-│   └── ecommerce_batch_etl.py       # DAG tasks, contract logic & S3 loader
+│   └── ecommerce_batch_etl.py       # Core Airflow DAG with validation & circuit breaker
 ├── include/
-│   └── landing_data/                # Local runtime staging directory
-├── logs/                            # Task execution logs
-├── plugins/
-├── tests/
-│   └── test_pipeline_assertions.py  # Automated contract verification suite
-├── docker-compose.yaml              # Multi-container orchestration specification
-├── TROUBLESHOOTING.md               # Root cause analysis & deployment logs
-└── README.md                        # Architectural documentation
+│   ├── generate_batch_data.py       # Batch payload generator with synthetic anomalies
+│   └── landing_data/                # Host-mounted volume for raw batch CSVs (gitignored)
+├── scripts/
+│   ├── setup_pipeline.ps1           # Provisions containers & creates verified S3 buckets
+│   ├── run_batch.ps1                # Triggers DAG, collects audit telemetry, opens UI
+│   └── teardown.ps1                 # Graceful resource release and container shutdown
+├── .env.example                     # Sanitized configuration template for version control
+├── .gitignore                       # Exclusion rules for secrets, logs, and datasets
+├── docker-compose.yaml              # Parameterized container orchestration definition
+└── README.md                        # Project architecture & engineering documentation
 ```
 
 ---
 
-## Quickstart & Local Setup
+## Setup & Execution Guide
 
-### 1. Start Docker Containers
+### 1. Configure Environment Secrets
+
+Create a local `.env` configuration file from the sanitized template:
+
 ```powershell
-docker compose up -d
+Copy-Item .env.example .env
 ```
 
-### 2. Create LocalStack S3 Buckets
-```powershell
-docker exec -it s3_storage awslocal s3 mb s3://ecommerce-raw-landing
-docker exec -it s3_storage awslocal s3 mb s3://ecommerce-curated-lake
-docker exec -it s3_storage awslocal s3 mb s3://ecommerce-quarantine
+Populate parameters inside your local `.env` file (**never commit `.env` to version control**):
+
+```ini
+AIRFLOW_UID=50000
+AIRFLOW_USER=<YOUR_AIRFLOW_USERNAME>
+AIRFLOW_PASSWORD=<YOUR_SECURE_PASSWORD>
+AIRFLOW_EMAIL=<YOUR_ADMIN_EMAIL>
+AIRFLOW_FERNET_KEY=<GENERATED_FERNET_KEY>
+POSTGRES_USER=<YOUR_POSTGRES_USER>
+POSTGRES_PASSWORD=<YOUR_POSTGRES_PASSWORD>
+POSTGRES_DB=airflow
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_DEFAULT_REGION=us-east-1
 ```
 
-### 3. Register AWS Connection in Airflow
+### 2. Provision Platform Infrastructure
+
+Deploys PostgreSQL, LocalStack, and Airflow services, then creates and verifies the enterprise S3 storage buckets:
+
 ```powershell
-docker exec -it airflow_webserver airflow connections add "aws_default" --conn-type "aws" --conn-extra '{"endpoint_url": "http://s3_storage:4566", "aws_access_key_id": "test", "aws_secret_access_key": "test", "region_name": "us-east-1"}'
+.\scripts\setup_pipeline.ps1
 ```
 
-### 4. Trigger the DAG
-1. Navigate to the Airflow Web UI at `http://localhost:8080`.
-2. Login with configured Airflow Admin credentials (as specified in `docker-compose.yaml`).
-3. Unpause `ecommerce_batch_etl_pipeline` and trigger the DAG.
+### 3. Run Batch Job & Inspect Live Telemetry
+
+Triggers the DAG, captures raw payload samples, prints reconciliation metrics, displays quarantined DLQ records, verifies Parquet lakehouse metadata, and launches the Airflow Web UI:
+
+```powershell
+.\scripts\run_batch.ps1
+```
+
+### 4. Teardown
+
+Stops all containers and releases host compute resources:
+
+```powershell
+.\scripts\teardown.ps1
+```
 
 ---
 
-## Storage & Contract Verification
+## Execution Audit Telemetry (Sample Run)
 
-Verify raw landing files, Hive partitions, and isolated anomalies directly from terminal:
-
-```powershell
-# Raw Landing Layer
-docker exec -it s3_storage awslocal s3 ls s3://ecommerce-raw-landing/raw/ --recursive
-
-# Curated Lakehouse Layer (Hive Parquet)
-docker exec -it s3_storage awslocal s3 ls s3://ecommerce-curated-lake/orders/ --recursive
-
-# Quarantine Layer (Anomalies)
-docker exec -it s3_storage awslocal s3 ls s3://ecommerce-quarantine/quarantine/ --recursive
-```
-
-### Run Automated Data Assertions
-```powershell
-Get-Content .\tests\test_pipeline_assertions.py | docker exec -i airflow_scheduler python -
-```
-
-**Expected Output:**
 ```text
-PASS: Curated Lake Integrity (957 clean rows verified, 0 data contract violations)
-PASS: Quarantine Integrity (43 anomalies correctly filtered without pipeline failure)
+[INFO] Telemetry Audit Summary:
+    Total Ingested Events : 1000
+    Curated Clean Events  : 957 (95.7%)
+    Quarantined Anomalies : 43 (4.3%)
+    Status                : SUCCESS - Zero Data Pollution
+
+[WARN] Isolated anomaly payloads (Data Contract Violations):
+    order_id,customer_id,product_category,quantity,unit_price,order_timestamp,payment_method
+    fc75e63b-e422-4606-85d6-2d1fa59e7a41,,Home & Kitchen,4,169.03,2026-11-01T21:59:44,NET_BANKING
+    db57085e-8086-4eb1-b4f9-b2912abf891c,CUST_4995,Beauty,-1,242.28,2026-11-01T18:36:18,DEBIT_CARD
+
+[INFO] Curated Parquet Output:
+    s3://ecommerce-curated-lake/orders/year=2026/month=11/day=01/orders_2026-11-01.parquet
+    Total Curated Records: 957 | Format: Snappy Parquet | Partition: Date Pruned
 ```
 
 ---
 
-## Author
+## Airflow Web Dashboard Access
 
-* **Name:** Arsalan Kazi
-* **Role:** Data Engineer
-* **Focus:** Distributed Systems, Lakehouse Architecture & Batch ETL Pipelines
+| Field | Value |
+| :--- | :--- |
+| **URL** | `http://localhost:8080` |
+| **Username** | Defined in `.env` (`AIRFLOW_USER`) |
+| **Password** | Defined in `.env` (`AIRFLOW_PASSWORD`) |
+| **Target DAG** | `ecommerce_batch_etl_pipeline` |
+
+---
+
+## 👨‍💻 Author & Maintainer
+
+<p align="left">
+  <img src="https://github.com/arsalankazi.png" width="90" style="border-radius:50%;" alt="Arsalan Kazi" />
+</p>
+
+### **Kazi Arsalan Ajaj Ahmed**
+*Data Engineer & Batch Pipeline Architect*
+
+[![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?style=flat&logo=github)](https://github.com/arsalankazi)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat&logo=linkedin)](https://linkedin.com/in/arsalankazi)
+[![Email](https://img.shields.io/badge/Email-Contact-D14836?style=flat&logo=gmail)](mailto:kaziarsalan810@gmail.com)
+
+---
+
+### 🎯 Core Engineering Focus
+
+- **Batch Orchestration:** Airflow DAG Design, Task Dependency Management, Retry Strategies & SLA Enforcement.
+- **Data Quality Engineering:** Pre-Ingestion Contracts, DLQ/Quarantine Patterns, Circuit Breaker SLAs & Idempotent Backfills.
+- **Lakehouse Storage:** Snappy Parquet Columnar Format, Hive Partition Pruning & Cost-Optimized S3 Layouts.

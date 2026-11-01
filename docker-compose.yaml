@@ -3,15 +3,15 @@ x-airflow-common:
   image: apache/airflow:2.8.1-python3.10
   environment:
     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
-    - AIRFLOW__CORE__FERNET_KEY=FB0o_zt4e3ZvfL54xZ7y9903x6k3m4n1p9876543210=
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
     - AIRFLOW__CORE__LOAD_EXAMPLES=False
     - AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS=False
     - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
     - _PIP_ADDITIONAL_REQUIREMENTS=pandas pyarrow boto3
-    - AWS_ACCESS_KEY_ID=test
-    - AWS_SECRET_ACCESS_KEY=test
-    - AWS_DEFAULT_REGION=us-east-1
+    - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+    - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
     - AWS_ENDPOINT_URL=http://s3-storage:4566
     - S3_ENDPOINT_URL=http://s3-storage:4566
   volumes:
@@ -28,9 +28,9 @@ services:
   postgres:
     image: postgres:13
     environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
@@ -46,7 +46,7 @@ services:
       - "4566:4566"
     environment:
       - SERVICES=s3
-      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
     volumes:
       - s3-volume:/var/lib/localstack
     restart: always
@@ -57,12 +57,12 @@ services:
     command: >
       bash -c "airflow db init &&
                airflow users create
-               --username arsalankazi
-               --password kazi@123
-               --firstname Arsalan
-               --lastname Kazi
+               --username ${AIRFLOW_USER}
+               --password ${AIRFLOW_PASSWORD}
+               --firstname Admin
+               --lastname User
                --role Admin
-               --email kaziarsalan810@gmail.com"
+               --email ${AIRFLOW_EMAIL}"
     restart: on-failure
 
   airflow-webserver:
