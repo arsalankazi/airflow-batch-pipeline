@@ -7,22 +7,23 @@ An enterprise-grade, idempotent batch data engineering pipeline built with **Apa
 ## Architecture & End-to-End Flow
 
 ```mermaid
+%%{init: {'themeVariables': {'edgeLabelBackground': '#0d3c61', 'textColor': '#ffffff'}}}%%
 flowchart TD
     subgraph Ingestion["Ingestion Layer"]
-        A[Daily Batch Generator] -->|"synthetic daily fixture: BATCH_SIZE rows (default 1,000)"| B[Raw Landing S3 Bucket]
-        B -->|"s3://ecommerce-raw-landing/"| C[Extract & Stage Memory Stream]
+        A[Daily Batch Generator] -->|synthetic daily fixture:<br/>BATCH_SIZE rows (default 1,000)| B[Raw Landing S3 Bucket]
+        B -->|s3://ecommerce-raw-landing/| C[Extract & Stage Memory Stream]
     end
 
     subgraph Validation["Contract Validation & Routing"]
         C --> D{Data Contract Validator}
-        D -->|"Breach: Null Customer / Qty <= 0"| E[Dead Letter Queue S3 Sink]
-        D -->|"Valid Schema & Clean Values"| F[Transform & Derived Metrics Engine]
+        D -->|Breach: Null Customer / Qty <= 0| E[Dead Letter Queue S3 Sink]
+        D -->|Valid Schema & Clean Values| F[Transform & Derived Metrics Engine]
     end
 
     subgraph Storage["Curated Lakehouse & Observability"]
-        E -->|"s3://ecommerce-quarantine/"| G[(Quarantine CSV Sink)]
-        F -->|"PyArrow Snappy Compression"| H[Date Partitioned Parquet Writer]
-        H -->|"s3://ecommerce-curated-lake/"| I[(Hive-Partitioned Lakehouse)]
+        E -->|s3://ecommerce-quarantine/| G[(Quarantine CSV Sink)]
+        F -->|PyArrow Snappy Compression| H[Date Partitioned Parquet Writer]
+        H -->|s3://ecommerce-curated-lake/| I[(Hive-Partitioned Lakehouse)]
         F --> J[Audit Telemetry & SLA Logger]
     end
 
@@ -46,6 +47,7 @@ flowchart TD
 ### Directed Acyclic Graph (DAG) Task Orchestration
 
 ```mermaid
+%%{init: {'themeVariables': {'edgeLabelBackground': '#0d3c61', 'textColor': '#ffffff'}}}%%
 flowchart LR
     T1[extract_and_generate_batch] --> T2[ingest_to_raw_landing]
     T2 --> T3[validate_and_quarantine]
@@ -63,6 +65,7 @@ flowchart LR
 This repository follows strict cloud security practices for credential isolation, zero-trust secrets management, and least-privilege operations:
 
 ```mermaid
+%%{init: {'themeVariables': {'edgeLabelBackground': '#0d3c61', 'textColor': '#ffffff'}}}%%
 flowchart TD
     A[Environment Config .env] -->|Excluded by .gitignore| B(Docker Compose Service Runtime)
     C[.env.example Template] -->|Committed to VCS| D[Zero Plaintext Secrets in Git]
