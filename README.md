@@ -118,7 +118,7 @@ Records that fail any rule are routed to the quarantine DLQ. If > 20% of a batch
 - **Pre-Ingestion Data Contracts:** Evaluates incoming batches in memory before downstream lake persistence. Records violating domain invariants (e.g., empty customer identifiers or negative order quantities) are filtered out immediately.
 - **Dead Letter Queue (DLQ) Quarantine Sink:** Prevents silent data loss and pipeline panics. Corrupted records are isolated to `s3://ecommerce-quarantine` for audit trails, compliance tracking, and asynchronous reprocessing.
 - **Circuit Breaker Pattern:** Protects compute and storage budgets. If the anomaly rate exceeds a **20% SLA breach threshold**, the DAG trips an `AirflowFailException` to abort downstream operations.
-- **Cost & Storage Optimization (Frugality):** Replaces uncompressed row-oriented CSV scans with columnar Snappy Parquet, reducing I/O footprint by **~70%** and accelerating analytical query engines (Athena/Trino) via Hive folder partitioning (`year=.../month=.../day=...`).
+- **Cost & Storage Optimization (Frugality):** Replaces uncompressed row-oriented CSV scans with columnar Snappy Parquet, significantly reducing I/O footprint and accelerating analytical query engines (Athena/Trino) via Hive folder partitioning (`year=.../month=.../day=...`).
 - **Idempotent Backfilling:** Designed with idempotent partition keys. Automated retries or manual historical backfills overwrite existing logical partition objects without producing duplicate state.
 
 ---
