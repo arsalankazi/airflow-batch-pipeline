@@ -37,9 +37,9 @@ flowchart TD
     class I lakehouse;
     class A,B,C,E,F,H,J compute;
 
-    style Ingestion fill:#0a1f33,stroke:#0288d1,stroke-width:1px,color:#ffffff
-    style Validation fill:#1a1a2e,stroke:#c77dff,stroke-width:1px,color:#ffffff
-    style Storage fill:#0d2318,stroke:#2e7d32,stroke-width:1px,color:#ffffff
+    style Ingestion fill:#0a1f33,stroke:#0288d1,stroke-width:2px,color:#ffffff,padding:30px
+    style Validation fill:#1a1a2e,stroke:#c77dff,stroke-width:2px,color:#ffffff,padding:30px
+    style Storage fill:#0d2318,stroke:#2e7d32,stroke-width:2px,color:#ffffff,padding:30px
 ```
 
 > **Scale note:** Daily volume is a synthetic fixture (default `BATCH_SIZE=1000`, configurable via env). The pipeline uses in-memory pandas validation + chunked S3 reads, sized for single-node daily volumes up to ~100K rows. Beyond that, the contract/quarantine logic ports 1:1 to PySpark.
