@@ -21,6 +21,12 @@ RAW_BUCKET = "ecommerce-raw-landing"
 CURATED_BUCKET = "ecommerce-curated-lake"
 QUARANTINE_BUCKET = "ecommerce-quarantine"
 
+# Synthetic daily fixture size — configurable via env so the same DAG can be
+# exercised at different volumes without code edits. Single-node pandas
+# in-memory validation → comfortable up to ~100K rows/day; beyond that the
+# contract/quarantine logic ports 1:1 to PySpark.
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1000"))
+
 CATEGORIES = ["Electronics", "Fashion", "Home & Kitchen", "Books", "Beauty"]
 PAYMENT_METHODS = ["CREDIT_CARD", "UPI", "NET_BANKING", "DEBIT_CARD"]
 
@@ -32,6 +38,49 @@ default_args = {
     "retries": 1,
     "retry_delay": timedelta(seconds=15),
 }
+
+# ---------------------------------------------------------------
+# Data Contract — single source of truth for validation rules.
+# Anything failing this contract is routed to the quarantine DLQ.
+# ---------------------------------------------------------------
+DATA_CONTRACT = {
+    "required_fields": [
+        "order_id", "customer_id", "product_category",
+        "quantity", "unit_price", "order_timestamp", "payment_method",
+    ],
+    # Added quantity & unit_price to explicitly catch nulls
+    "non_null": ["order_id", "customer_id", "order_timestamp", "quantity", "unit_price"],
+    "non_empty_string": ["customer_id"],
+    "domain_rules": {
+        # .fillna(False) ensures NA never silently drops a row
+        "quantity":    lambda s: (s > 0).fillna(False),
+        "unit_price":  lambda s: (s > 0).fillna(False),
+        "customer_id": lambda s: s.astype(str).str.fullmatch(r"CUST_\d+"),
+    },
+}
+
+
+def apply_contract(df):
+    """Split df into (valid, quarantined) using DATA_CONTRACT."""
+    missing = [c for c in DATA_CONTRACT["required_fields"] if c not in df.columns]
+    if missing:
+        raise ValueError(f"Schema breach — missing columns: {missing}")
+
+    mask = pd.Series(True, index=df.index)
+
+    for col in DATA_CONTRACT["non_null"]:
+        mask &= df[col].notna()
+
+    for col in DATA_CONTRACT["non_empty_string"]:
+        mask &= df[col].astype(str).str.strip().ne("")
+        mask &= df[col].astype(str).str.lower().ne("nan")
+
+    for col, rule in DATA_CONTRACT["domain_rules"].items():
+        # .fillna(False) defensive check in case domain rule generates NA
+        mask &= rule(df[col]).fillna(False)
+
+    return df[mask].copy(), df[~mask].copy()
+
 
 def get_s3_client():
     return boto3.client(
@@ -49,7 +98,7 @@ def extract_and_generate_batch(ds, **kwargs):
     file_path = os.path.join(landing_dir, f"orders_batch_{ds}.csv")
     
     base_date = datetime.strptime(ds, "%Y-%m-%d")
-    num_records = 1000
+    num_records = BATCH_SIZE
     
     with open(file_path, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -104,16 +153,8 @@ def validate_and_quarantine(ds, ti, **kwargs):
     
     initial_count = len(df)
     
-    # Contract validation: customer_id must not be empty, quantity > 0, unit_price > 0
-    valid_mask = (
-        df["customer_id"].notna() & 
-        (df["customer_id"].astype(str).str.strip() != "") & 
-        (df["quantity"] > 0) & 
-        (df["unit_price"] > 0)
-    )
-    
-    df_valid = df[valid_mask].copy()
-    df_quarantine = df[~valid_mask].copy()
+    # Contract-driven split: valid → curated lake, invalid → quarantine DLQ
+    df_valid, df_quarantine = apply_contract(df)
     
     clean_count = len(df_valid)
     bad_count = len(df_quarantine)
@@ -175,7 +216,7 @@ def log_pipeline_metrics(ds, ti, **kwargs):
     print(f" Total Ingested Events : {total}")
     print(f" Curated Clean Events  : {clean_count} ({(clean_count/total)*100:.1f}%)")
     print(f" Quarantined Anomalies : {bad_count} ({(bad_count/total)*100:.1f}%)")
-    print(f" Status                : SUCCESS - Zero Data Pollution")
+    print(f" Status                : SUCCESS - Curated Layer Clean")
     print("=" * 60)
 
 with DAG(

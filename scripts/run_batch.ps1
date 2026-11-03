@@ -83,4 +83,4 @@ if ($parquet_output) {
 Write-Log "INFO" "Launching Airflow Graph View in default workspace browser..."
 Start-Process "http://localhost:8080/dags/ecommerce_batch_etl_pipeline/graph"
 
-Write-Log "SUCCESS" "Batch execution completed. All layers reconciled and isolated with zero data pollution."
+Write-Log "SUCCESS" "Batch execution completed. All layers reconciled. Curated layer is clean."

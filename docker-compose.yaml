@@ -14,6 +14,7 @@ x-airflow-common:
     - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
     - AWS_ENDPOINT_URL=http://s3-storage:4566
     - S3_ENDPOINT_URL=http://s3-storage:4566
+    - BATCH_SIZE=${BATCH_SIZE:-1000}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -91,3 +92,4 @@ services:
 volumes:
   postgres-db-volume:
   s3-volume:
+  
